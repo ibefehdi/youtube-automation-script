@@ -94,9 +94,12 @@ tools\tts-env\Scripts\python.exe -m pip install --upgrade pip wheel
 tools\tts-env\Scripts\python.exe -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
 tools\tts-env\Scripts\python.exe -m pip install "kokoro>=0.9" "misaki[en]" soundfile numpy
 tools\tts-env\Scripts\python.exe -m pip install chatterbox-tts
-# chatterbox-tts may pin an older torch — put Blackwell wheels back
-tools\tts-env\Scripts\python.exe -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# chatterbox-tts pins torch==2.6.0 (no sm_120). Force Blackwell wheels back —
+# a plain reinstall is a no-op because pip thinks 2.6.0 already satisfies torch.
+tools\tts-env\Scripts\python.exe -m pip install --force-reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu128
 ```
+
+If your default `python` is 3.14, always use `py -3.12` for both venvs (as above). Do not create them with store Python.
 
 The fully-acted install (`orpheus-speech`) is attempted by the bash script. On native Windows it usually **fails**. That is expected. Natural and emotional voices still work. If you truly need the fully-acted option, use WSL2 Ubuntu on the same 5080 (same `cu128` steps, then `pip install orpheus-speech`).
 
@@ -106,12 +109,12 @@ The fully-acted install (`orpheus-speech`) is attempted by the bash script. On n
 tools\tts-env\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda')"
 ```
 
-Good: `2.9.x+cu128` (or newer), `True`, `NVIDIA GeForce RTX 5080`.
+Good: `2.11.x+cu128` (or newer), `True`, `NVIDIA GeForce RTX 5080`.
 
-Bad: `False`, or a crash mentioning `sm_120` / `not compatible`. Then **only** this, do not `pip install torch` from PyPI:
+Bad: `False`, `2.6.0` without `+cu128`, or a crash mentioning `sm_120` / `not compatible`. Then **only** this (must use `--force-reinstall`), do not `pip install torch` from PyPI:
 
 ```powershell
-tools\tts-env\Scripts\python.exe -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+tools\tts-env\Scripts\python.exe -m pip install --force-reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu128
 ```
 
 If `cu128` is still old, try `cu129` at `https://download.pytorch.org/whl/cu129`.
@@ -226,8 +229,9 @@ If the richer voices are not installed yet, the AI runs `bash scripts/setup_loca
 
 | Symptom | Fix |
 |---|---|
-| `sm_120 is not compatible` / CUDA capability error | Reinstall torch from `cu128` or `cu129`. Never use the default PyPI torch on a 50-series card. |
-| `torch.cuda.is_available()` is `False` on Windows | Driver too old, or you installed a CPU/Mac wheel into `tts-env`. Reinstall `cu128`. |
+| `sm_120 is not compatible` / CUDA capability error | Force-reinstall torch from `cu128` or `cu129` (`--force-reinstall`). Never use the default PyPI torch on a 50-series card. |
+| After chatterbox, torch shows `2.6.0` not `+cu128` | Expected. Run `pip install --force-reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu128` in `tts-env`. |
+| `torch.cuda.is_available()` is `False` on Windows | Driver too old, or you installed a CPU/Mac wheel into `tts-env`. Force-reinstall `cu128`. |
 | `chatterbox` / `kokoro` import fails | You ran the voiceover script with `piper-env`. Use `tools/tts-env/.../python`. |
 | Piper `ModuleNotFoundError` | You ran it with `tts-env`. Use `tools/piper-env/.../python`. |
 | Fully-acted not offered / install failed | Expected on Mac and on native Windows. Use a 5080 under WSL2/Linux if you need it. |

@@ -62,8 +62,8 @@ fi
 "${PIP[@]}" install chatterbox-tts
 
 if [[ "$HAS_NVIDIA" -eq 1 ]]; then
-  # chatterbox-tts may pin an older torch; put the 12.8 wheel back.
-  "${PIP[@]}" install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+  # chatterbox-tts pins torch==2.6.0 (no sm_120). Force the Blackwell cu128 wheel back.
+  "${PIP[@]}" install --force-reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu128
 fi
 
 if [[ "$HAS_NVIDIA" -eq 1 ]]; then
