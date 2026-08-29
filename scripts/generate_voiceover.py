@@ -920,6 +920,9 @@ def main() -> int:
                         args.exaggeration,
                         args.cfg_weight,
                     )
+                    if not args.no_deep:
+                        audio = pitch_shift(audio, args.semitones)
+                        audio = add_warmth(audio, sample_rate)
                     write_wav(wav_path, audio, sample_rate)
                 elif provider == "orpheus":
                     audio, sample_rate = synthesize_orpheus(
