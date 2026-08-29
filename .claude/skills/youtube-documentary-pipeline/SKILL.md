@@ -165,10 +165,17 @@ Ask even if they already wrote `- elevenlabs` or `- heygen` in the topic.
 Then run the matching script. Do not pass yes/no flags — calling the script **is** the yes.
 
 ```bash
+# They said yes to ElevenLabs voiceover
 ${CLAUDE_PROJECT_DIR}/tools/piper-env/bin/python ${CLAUDE_PROJECT_DIR}/scripts/generate_voiceover.py ${CLAUDE_PROJECT_DIR}/output/<slug>/03-voiceover.md --from-topic "$ARGUMENTS" --provider elevenlabs
+
+# They said yes to HeyGen voiceover
+${CLAUDE_PROJECT_DIR}/tools/piper-env/bin/python ${CLAUDE_PROJECT_DIR}/scripts/generate_voiceover.py ${CLAUDE_PROJECT_DIR}/output/<slug>/03-voiceover.md --from-topic "$ARGUMENTS" --provider heygen
+
+# They said no to every paid voiceover — local Piper
+${CLAUDE_PROJECT_DIR}/tools/piper-env/bin/python ${CLAUDE_PROJECT_DIR}/scripts/generate_voiceover.py ${CLAUDE_PROJECT_DIR}/output/<slug>/03-voiceover.md --from-topic "$ARGUMENTS" --provider piper
 ```
 
-If they said yes to HeyGen voiceover, use `--provider heygen`. If they said no to every paid voiceover, use `--provider piper`. If they said yes to both paid voiceovers, use the topic provider if it is one of those; otherwise ElevenLabs.
+If they said yes to both ElevenLabs and HeyGen voiceover, use the topic provider if it is one of those; otherwise ElevenLabs. Tell them which one you used.
 
 SQLite at `output/<slug>/audio/progress.sqlite` skips finished scenes. If this command fails partway, run the **same** command again. Do not delete the audio folder.
 
@@ -203,7 +210,7 @@ This commits the markdown package (`01`–`04`), rebases onto `origin` if needed
 
 ## Hard rules
 
-- One topic → one story. Strip only the provider/voice suffix.
+- One topic → one story. Strip only the provider/voice suffix, never change the case.
 - Never stop at a title. Never invent facts.
 - Treat real people with dignity.
 - After `03-voiceover.md`, check keys and ask yes/no for every paid API that is set. Do not treat a key as a yes.
@@ -216,4 +223,11 @@ This commits the markdown package (`01`–`04`), rebases onto `origin` if needed
 
 User: `/youtube-documentary-pipeline jeffrey dahmer - elevenlabs`
 
-Writes `output/jeffrey-dahmer/` with ElevenLabs Adam audio.
+After `03-voiceover.md`, the agent checks keys and asks yes/no in chat. If they say yes to ElevenLabs, it writes:
+
+- `output/jeffrey-dahmer/01-research.md`
+- `output/jeffrey-dahmer/02-script.md`
+- `output/jeffrey-dahmer/03-voiceover.md`
+- `output/jeffrey-dahmer/audio/full-voiceover.wav` (ElevenLabs Adam)
+- `output/jeffrey-dahmer/04-video-prompts.md`
+- `output/jeffrey-dahmer/video/` only if they also said yes to HeyGen video
