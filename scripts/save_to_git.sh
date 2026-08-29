@@ -28,6 +28,7 @@ git add -- \
   README.md \
   .gitignore \
   scripts/ \
+  tools/voices/narrator.wav \
   .cursor/skills/youtube-documentary-pipeline/ \
   .claude/skills/youtube-documentary-pipeline/ \
   2>/dev/null || true

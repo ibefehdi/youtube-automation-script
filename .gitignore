@@ -10,13 +10,15 @@ tools/piper-voices/*.onnx
 
 # Local Kokoro / Chatterbox / Orpheus runtime
 tools/tts-env/
-tools/voices/*.wav
+tools/voices/*
+!tools/voices/narrator.wav
 
 # Generated audio, video, and resume DB
 output/**/audio/
 output/**/video/
 output/_piper-test/
 *.wav
+!tools/voices/narrator.wav
 *.mp3
 *.mp4
 
