@@ -155,7 +155,7 @@ Always run this after Step 4, even if audio had errors. Do not skip. Do not wait
 bash ${CLAUDE_PROJECT_DIR}/scripts/save_to_git.sh <slug> "$ARGUMENTS"
 ```
 
-This commits the markdown package (`01`–`04`) and pushes the current branch to `origin`. WAV files stay local (gitignored). If push fails, report the error; the local commit must still exist. Never force-push. Never skip hooks. Never change git config.
+This commits the markdown package (`01`–`04`), rebases onto `origin` if needed, and pushes the current branch. It uses **this machine’s** GitHub login (`origin` remote), not a hardcoded user. WAV files stay local (gitignored). If push fails (not a collaborator, wrong GitHub account), report the error; the local commit must still exist. Never force-push. Never skip hooks. Never change git config.
 
 ## Hard rules
 

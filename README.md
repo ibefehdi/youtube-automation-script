@@ -68,7 +68,7 @@ The agent researches the story, writes the script, splits the voiceover, generat
 ### Audio only (if the markdown already exists)
 
 ```bash
-cd /Users/fahadasad/Downloads/youtube
+cd /path/to/this/repo
 
 # Local Piper (free)
 tools/piper-env/bin/python scripts/generate_voiceover.py \
@@ -196,9 +196,12 @@ Every pipeline run ends with `scripts/save_to_git.sh`. That script:
 
 1. Adds `output/<slug>/01-research.md` through `04-video-prompts.md`
 2. Commits with a message like `Save documentary package: jeffrey-dahmer`
-3. Pushes the current branch to `origin` (SSH, as already set up)
+3. Pulls with rebase (so two people do not overwrite each other)
+4. Pushes the current branch to **whatever `origin` is on this machine**
 
-Audio WAVs, Piper models, and `.env` stay **local**. They are gitignored on purpose (too large / secret). The text history — research, script, timed voiceover, video prompts — is what gets pushed.
+It does **not** use one person’s SSH key. Whoever is signed in on that computer is who GitHub sees.
+
+Audio WAVs, Piper models, and `.env` stay **local**. They are gitignored. The text history is what gets pushed.
 
 You do not run this yourself when using the skill. To save a folder by hand:
 
@@ -206,13 +209,60 @@ You do not run this yourself when using the skill. To save a folder by hand:
 bash scripts/save_to_git.sh the-silk-road-dark-web "the silk road - dark web"
 ```
 
-Needs:
+### Shared repo: more than one person
 
-- A git repo (already initialized)
-- `origin` pointing at GitHub over SSH, e.g. `git@github.com:ibefehdi/youtube-automation-script.git`
-- Permission to push that repo (the `ibefehdi` key)
+Anyone on the team can push. Each person uses **their own** GitHub account.
 
-If the network blips, the commit is still on disk. Run the same `save_to_git.sh` line again, or `git push`. The script never force-pushes.
+**Repo owner (once):**
+
+1. GitHub → the shared repo → **Settings → Collaborators**  
+2. Invite each person (brother, teammate) with **Write** access  
+3. They must accept the email/invite  
+
+**Everyone else (each laptop, once):**
+
+1. Create your own GitHub account if you do not have one  
+2. Clone the **shared** repo (do not fork unless you want a private copy):
+
+```bash
+git clone git@github.com:OWNER/REPO.git
+cd REPO
+```
+
+3. Sign **your** account into the CLI — not someone else’s key.
+
+**SSH (preferred):**
+
+```bash
+ssh-keygen -t ed25519 -C "you@email.com"
+# GitHub → your account → Settings → SSH and GPG keys → add ~/.ssh/id_ed25519.pub
+ssh -T git@github.com
+# Must print YOUR username, not a sibling’s
+```
+
+**Or GitHub CLI:**
+
+```bash
+brew install gh
+gh auth login
+```
+
+4. Confirm `origin` is the shared repo, not a personal fork:
+
+```bash
+git remote -v
+# origin  git@github.com:OWNER/REPO.git
+```
+
+If `origin` is missing:
+
+```bash
+git remote add origin git@github.com:OWNER/REPO.git
+```
+
+A **403** means this laptop’s GitHub user is not a collaborator, or it is logged in as the wrong account. The owner adds Write access; you sign in as the invited user. Do not copy someone else’s private SSH key.
+
+If two people finish a run at the same time, the script rebases onto `origin` first. If that conflicts, the local commit is kept — resolve, then `git push`. The script never force-pushes.
 
 ---
 
@@ -223,7 +273,7 @@ You need **Python 3.12** (3.14 can break Piper wheels).
 ### 1. Piper environment
 
 ```bash
-cd /Users/fahadasad/Downloads/youtube
+cd /path/to/this/repo
 
 python3.12 -m venv tools/piper-env
 source tools/piper-env/bin/activate
@@ -253,7 +303,7 @@ curl -L -o en_US-lessac-medium.onnx.json \
 ### 3. Smoke test
 
 ```bash
-cd /Users/fahadasad/Downloads/youtube
+cd /path/to/this/repo
 source tools/piper-env/bin/activate
 
 echo "This is a test of the documentary voiceover." | \
