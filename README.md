@@ -5,18 +5,16 @@ Give this project **one topic**. It turns that topic into a full YouTube documen
 1. Deep research dossier  
 2. 15,000–18,000 character narration script  
 3. Timed 10-second voiceover scenes  
-4. Spoken audio (local Piper, ElevenLabs, or HeyGen)  
+4. Spoken audio (local or paid — you describe how it should sound)  
 5. AI video prompts for every scene (and optional HeyGen clips if you say yes)
 
-You do not edit code to pick a voice or a provider. That is all in the topic line. If `ELEVENLABS_API_KEY` or `HEYGEN_API_KEY` is set, the AI still asks **yes/no** in chat before it runs that script.
+You do not edit code to pick a voice. Type the **story** in chat. After the scenes are written, the AI asks how the narrator should sound in plain English. If `ELEVENLABS_API_KEY` or `HEYGEN_API_KEY` is set, it still asks **yes/no** before any paid script.
 
 **You need a GitHub account signed in on the CLI.** The skill checks this first and will not generate anything until `gh auth login` or SSH to GitHub succeeds.
 
 ```
 the silk road - dark web
-jeffrey dahmer - elevenlabs
-jeffrey dahmer - elevenlabs - daniel
-jeffrey dahmer - heygen
+jeffrey dahmer
 ```
 
 ---
@@ -60,7 +58,7 @@ the silk road - dark web
 or name the skill:
 
 ```
-@youtube-documentary-pipeline jeffrey dahmer - elevenlabs
+@youtube-documentary-pipeline jeffrey dahmer
 ```
 
 ### In Claude Code
@@ -69,26 +67,30 @@ or name the skill:
 /youtube-documentary-pipeline the silk road - dark web
 ```
 
-The agent **first checks that GitHub is signed in**. If not, it stops and asks you to log in. After the voiceover script is written, it checks for API keys and asks **yes/no** in chat (ElevenLabs voiceover, HeyGen voiceover, HeyGen video). It only runs those scripts after you answer. Piper is the local fallback if you say no to paid voiceover.
+The agent **first checks that GitHub is signed in**. If not, it stops and asks you to log in. After the voiceover script is written, it asks how the narrator should sound, and **yes/no** for any paid key that is set. It only runs those scripts after you answer.
 
 ### Audio only (if the markdown already exists)
+
+The AI normally picks the engine from your chat reply. These commands are for reruns:
 
 ```bash
 cd /path/to/this/repo
 
-# Local Piper (free)
-tools/piper-env/bin/python scripts/generate_voiceover.py \
-  output/the-silk-road-dark-web/03-voiceover.md
+# Local (after you described the sound)
+tools/tts-env/bin/python scripts/generate_voiceover.py \
+  output/the-silk-road-dark-web/03-voiceover.md --provider chatterbox
 
-# ElevenLabs (from the same topic line)
+# Rumble / fast local
 tools/piper-env/bin/python scripts/generate_voiceover.py \
-  output/the-silk-road-dark-web/03-voiceover.md \
-  --from-topic "the silk road - dark web - elevenlabs"
+  output/the-silk-road-dark-web/03-voiceover.md --provider piper
+
+# ElevenLabs
+tools/piper-env/bin/python scripts/generate_voiceover.py \
+  output/the-silk-road-dark-web/03-voiceover.md --provider elevenlabs
 
 # HeyGen voiceover
 tools/piper-env/bin/python scripts/generate_voiceover.py \
-  output/the-silk-road-dark-web/03-voiceover.md \
-  --from-topic "the silk road - dark web - heygen"
+  output/the-silk-road-dark-web/03-voiceover.md --provider heygen
 
 # HeyGen video clips (after 04-video-prompts.md exists)
 tools/piper-env/bin/python scripts/generate_video.py \
@@ -147,103 +149,56 @@ Exit code 0 means generation is allowed.
 
 ## Topic syntax
 
-The last `- piper`, `- elevenlabs`, or `- heygen` is a **flag**, not part of the story. Everything before it is the case you want researched.
+Type the story. Dashes in the case name are fine (`the silk road - dark web`). You do **not** add a voice flag.
 
-| You type | Story researched | Audio |
-|---|---|---|
-| `the silk road - dark web` | Silk Road | Piper (default) |
-| `the silk road - dark web - piper` | Silk Road | Piper |
-| `jeffrey dahmer - elevenlabs` | Jeffrey Dahmer | ElevenLabs **Adam** |
-| `jeffrey dahmer - elevenlabs - daniel` | Jeffrey Dahmer | ElevenLabs Daniel |
-| `jeffrey dahmer - elevenlabs - deep male` | Jeffrey Dahmer | ElevenLabs Adam |
-| `el chapo - elevenlabs - pNInz6obpgDQGcFmaJgB` | El Chapo | That voice ID |
-| `jeffrey dahmer - heygen` | Jeffrey Dahmer | HeyGen documentary male |
-| `jeffrey dahmer - heygen - brian` | Jeffrey Dahmer | HeyGen voice named Brian |
+| You type | Story researched |
+|---|---|
+| `the silk road - dark web` | Silk Road |
+| `jeffrey dahmer` | Jeffrey Dahmer |
 
-Check what a line will do without generating audio:
+The folder name is the **story slug**: `output/jeffrey-dahmer/`.
 
-```bash
-tools/piper-env/bin/python scripts/generate_voiceover.py \
-  --parse-topic "jeffrey dahmer - elevenlabs - daniel"
-```
+After `03-voiceover.md`, the AI asks how it should sound. Reply in normal language:
 
-```json
-{
-  "topic": "jeffrey dahmer",
-  "slug": "jeffrey-dahmer",
-  "provider": "elevenlabs",
-  "voice": "daniel"
-}
-```
+> How should this sound?
+> - Deep rumble, fast, a bit flat
+> - Natural documentary narrator
+> - More emotional, like someone telling you the story
+> - Fully acted, with breath and feeling
 
-The folder name is always the **story slug**, never `jeffrey-dahmer-elevenlabs`.
+“More human” or “not robotic” is enough. You can later say “redo it, more human” and it regenerates.
+
+Paid keys still get a yes/no. Local is the fallback when you say no, after the sound question.
 
 ---
 
 ## Voices
 
-### Piper (local, free)
-
-Default. Runs on your Mac. No API key.
-
-- Voice: `en_US-ryan-high` (male narrator)
-- Then pitched down **3.5 semitones** and slowed **15%** so it sits closer to a faceless-channel rumble
-- Fallback if Ryan is missing: `en_US-lessac-medium`
-
-Make it even deeper on a one-off run:
+You pick by **sound**, in chat. First time on a machine, the richer local voices need:
 
 ```bash
-tools/piper-env/bin/python scripts/generate_voiceover.py \
-  output/the-silk-road-dark-web/03-voiceover.md \
-  --semitones -5
+bash scripts/setup_local_tts.sh
 ```
 
-### ElevenLabs (paid, higher quality)
+That creates `tools/tts-env` (does not touch Piper). Optional: drop an 8–15s dry WAV at `tools/voices/narrator.wav` to steer the more emotional local voice.
 
-Needs a key once:
+### ElevenLabs (paid)
 
 ```bash
 echo 'ELEVENLABS_API_KEY=your_key_here' >> .env
 ```
 
-or:
-
-```bash
-export ELEVENLABS_API_KEY=your_key_here
-```
-
-The file can also live at `tools/.env`. Do not commit the key.
-
-If you only write `- elevenlabs` and nothing else, the voice is **Adam** (deep documentary male). You pick a different voice in the topic, not in code.
-
-| What you type after `- elevenlabs -` | Voice |
-|---|---|
-| *(nothing)*, `adam`, `deep`, `deep male`, `documentary`, `narrator`, `rumble`, `youtube` | Adam |
-| `daniel`, `news`, `british` | Daniel |
-| `chris` | Chris |
-| `antoni`, `warm` | Antoni |
-| `josh` | Josh |
-| `bill`, `gravel` | Bill |
-| any other name | Searched in your ElevenLabs account |
-| a voice ID | Used as-is |
+The file can also live at `tools/.env`. Do not commit the key. Default paid voice is **Adam**. Having the key does **not** start a run.
 
 ### HeyGen (paid, voiceover and optional video)
-
-Needs a key once:
 
 ```bash
 echo 'HEYGEN_API_KEY=your_key_here' >> .env
 ```
 
-or:
+The AI asks two yes/no questions: HeyGen voiceover, and HeyGen video. Video clips come from `04-video-prompts.md` via Video Agent (landscape, exact narration, no captions). Each clip can take several minutes and uses credits.
 
-```bash
-export HEYGEN_API_KEY=your_key_here
-```
-
-If you only write `- heygen`, the script picks a Starfish-compatible male English voice (prefers **Chill Brian**). Any other name is searched in your HeyGen voice list. A 32-character hex ID is used as-is.
-
-Having the key does **not** start a run. In the skill, the AI asks two yes/no questions: HeyGen voiceover, and HeyGen video. Video clips come from `04-video-prompts.md` via Video Agent (landscape, exact narration, no captions). Each clip can take several minutes and uses credits.
+What the AI picked (only if you ask): rumble → Piper, natural → Kokoro, emotional → Chatterbox, fully acted → Orpheus. Paid yes → ElevenLabs or HeyGen.
 
 ---
 
@@ -377,7 +332,15 @@ curl -L -o en_US-lessac-medium.onnx.json \
   "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
 ```
 
-### 3. Smoke test
+### 3. Local voices (Kokoro / Chatterbox / Orpheus)
+
+```bash
+bash scripts/setup_local_tts.sh
+```
+
+Uses CUDA 12.8 when `nvidia-smi` is present (RTX 5080). On a Mac it installs the CPU/MPS stack. The fully-acted voice needs CUDA + vLLM, so it may skip on macOS.
+
+### 4. Smoke test
 
 ```bash
 cd /path/to/this/repo
@@ -403,9 +366,10 @@ youtube/
   Generate Video Prompts.docx   Original visual-prompt prompt
 
   scripts/
-    generate_voiceover.py       Piper + ElevenLabs + HeyGen TTS + SQLite resume
+    generate_voiceover.py       Local + paid TTS + SQLite resume
     generate_video.py           HeyGen Video Agent clips + SQLite resume
-    pipeline_lib.py             Topic parse, key check, prompt parsers
+    pipeline_lib.py             Topic parse, voice menu, key check, parsers
+    setup_local_tts.sh                One-time Kokoro / Chatterbox / Orpheus venv
     require_github.sh                 Hard stop until GitHub CLI/SSH is signed in
     setup_github_gate_protection.sh   Install GitHub rulesets that reject gate removal
     save_to_git.sh                    Commit markdown + push after every run
@@ -415,6 +379,8 @@ youtube/
   tools/
     piper-env/                  Python venv with piper-tts
     piper-voices/               .onnx voice models
+    tts-env/                    Kokoro / Chatterbox / Orpheus (after setup)
+    voices/                     optional narrator.wav clone clip
 
   .cursor/skills/youtube-documentary-pipeline/
     SKILL.md                    Cursor skill
@@ -454,7 +420,7 @@ Every word of the script, split at natural breaks into ~**25 words / 10 seconds*
 
 ### 4. Audio
 
-`scripts/generate_voiceover.py` reads `03-voiceover.md` and writes WAVs. Piper is local and free. ElevenLabs and HeyGen are optional and selected in the topic line — but the AI still asks yes/no in chat before it runs a paid script.
+`scripts/generate_voiceover.py` reads `03-voiceover.md` and writes WAVs. Local voices are free. The AI asks how it should sound, then passes `--provider`. ElevenLabs and HeyGen are optional and still need an explicit yes in chat.
 
 ### 5. Video prompts
 
@@ -466,17 +432,22 @@ One prompt per voiceover scene: narration copied exactly, plus setting, lighting
 
 ```bash
 tools/piper-env/bin/python scripts/generate_voiceover.py INPUT.md [options]
+# or tools/tts-env/bin/python for Kokoro / Chatterbox / Orpheus
 ```
 
 | Flag | Meaning |
 |---|---|
-| `--from-topic "..."` | Parse provider + voice from the topic line |
+| `--from-topic "..."` | Parse story (and optional hidden provider) from the topic line |
 | `--parse-topic "..."` | Print JSON and exit (no audio) |
 | `--check-keys` | Print which paid API keys are set (JSON) and exit |
-| `--provider piper \| elevenlabs \| heygen` | Override provider |
-| `--voice NAME` | Piper model, ElevenLabs/HeyGen alias, name, or ID |
+| `--voice-menu` | Plain-English sound options the AI should ask |
+| `--resolve-intent "..."` | Map a chat reply to a provider (JSON) |
+| `--provider ...` | `piper`, `kokoro`, `chatterbox`, `orpheus`, `elevenlabs`, `heygen` |
+| `--voice NAME` | Engine voice name, alias, or ID |
 | `--semitones -3.5` | Piper pitch (negative = deeper) |
 | `--length-scale 1.15` | Piper speed (`>1` = slower) |
+| `--exaggeration 0.4` | Chatterbox emotion |
+| `--cfg-weight 0.45` | Chatterbox pacing |
 | `--pause 0.45` | Silence after `(pause)` |
 | `--long-pause 1.15` | Silence after `(long pause)` |
 | `--no-deep` | Skip Piper pitch/warmth |
@@ -512,5 +483,5 @@ tools/piper-env/bin/python scripts/generate_video.py INPUT.md [options]
 ## Notes
 
 - Treat real victims and families with care. The prompts forbid invented quotes and sensational gore.  
-- Piper is unlimited and offline. ElevenLabs bills per character; a 16k-character script is about one long video on a Starter plan. HeyGen bills for speech and for each Video Agent clip.  
-- Large files live under `tools/piper-env/`, `tools/piper-voices/`, and `output/`. Keep secrets in `.env`, not in git.
+- Local voices are unlimited and offline after setup. ElevenLabs bills per character; a 16k-character script is about one long video on a Starter plan. HeyGen bills for speech and for each Video Agent clip.  
+- Large files live under `tools/piper-env/`, `tools/tts-env/`, `tools/piper-voices/`, and `output/`. Keep secrets in `.env`, not in git.

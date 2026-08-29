@@ -2,10 +2,10 @@
 name: youtube-documentary-pipeline
 description: >
   Runs the full faceless documentary pipeline from one topic: deep research
-  dossier, 15k–18k narration script, 10-second voiceover scenes, Piper /
-  ElevenLabs / HeyGen audio, optional HeyGen video, then AI video prompts.
-  Use when the user gives a topic (e.g. "jeffrey dahmer - elevenlabs"),
-  asks to make a YouTube documentary, or generate voiceover / video.
+  dossier, 15k–18k narration script, 10-second voiceover scenes, local or
+  paid audio, optional HeyGen video, then AI video prompts. Use when the
+  user gives a topic (e.g. "jeffrey dahmer"), asks to make a YouTube
+  documentary, or generate voiceover / video.
 when_to_use: >
   Invoke when the user types a lone topic, asks for a faceless documentary,
   says "make the video", "run the pipeline", or mentions research + script +
@@ -22,42 +22,19 @@ One topic in. Research, script, timed voiceover, spoken audio, then video prompt
 
 ## Topic syntax (hands-off)
 
-The user never edits code. Provider and voice are in the topic line.
+The user never edits code. The topic is **only the story**. They do not name a voice engine.
 
 ```
 <story>
-<story> - piper
-<story> - elevenlabs
-<story> - elevenlabs - <voice>
-<story> - heygen
-<story> - heygen - <voice>
 ```
 
-Examples:
+Examples: `the silk road - dark web`, `jeffrey dahmer`.
 
-- `the silk road - dark web` → local Piper, deep Ryan
-- `jeffrey dahmer - elevenlabs` → ElevenLabs, default **Adam** (deep documentary male)
-- `jeffrey dahmer - elevenlabs - daniel` → ElevenLabs Daniel
-- `jeffrey dahmer - elevenlabs - deep male` → same as Adam
-- `jeffrey dahmer - heygen` → HeyGen, default documentary male
-- `jeffrey dahmer - heygen - brian` → HeyGen voice named Brian
+After the voiceover scenes are written, you ask how it should **sound** in plain English. You map that answer to `--provider`. Never ask them to type `- piper`, `- kokoro`, `- chatterbox`, or `- orpheus`. Never list those names unless they ask what you used.
 
-Voice after `elevenlabs` or `heygen` can be a name, an alias, or a voice ID.
+Paid keys (`ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`) can live in the environment or in `.env` / `tools/.env`. Do not ask them to edit Python.
 
-| Alias | Voice |
-|---|---|
-| *(omitted)*, adam, deep, deep male, documentary, narrator, rumble, youtube | Adam |
-| daniel, news, british | Daniel |
-| chris | Chris |
-| antoni, warm | Antoni |
-| josh | Josh |
-| bill, gravel | Bill |
-
-If they name a voice that is not in the table, the script searches their account.
-
-ElevenLabs needs `ELEVENLABS_API_KEY`. HeyGen needs `HEYGEN_API_KEY`. Either can live in the environment or in `.env` / `tools/.env`. Do not ask them to edit Python.
-
-**A key is not consent.** If a paid key is set, you (the AI) must ask a yes/no question in chat before running that script. The scripts do not prompt. Do not generate ElevenLabs or HeyGen audio or HeyGen video until they answer.
+**A key is not consent.** If a paid key is set, ask yes/no in chat before running that script. The scripts do not prompt. Do not generate ElevenLabs or HeyGen audio or HeyGen video until they answer.
 
 ## Input
 
@@ -77,7 +54,7 @@ bash ${CLAUDE_PROJECT_DIR}/scripts/require_github.sh
 
 If it exits non-zero: do **not** parse the topic, do **not** create `output/`, do **not** research. Show the script’s instructions, tell them to sign in with `gh auth login` or SSH, then invoke the skill again. Only continue after a later run of `require_github.sh` exits 0.
 
-Then parse the raw topic. Use this JSON for the story title, folder slug, provider, and voice. Do not put `elevenlabs` / `heygen` / `piper` / the voice name into the research topic.
+Then parse the raw topic. Use this JSON for the story title and folder slug. Do not put a provider name or a voice name into the research topic.
 
 ```bash
 ${CLAUDE_PROJECT_DIR}/tools/piper-env/bin/python ${CLAUDE_PROJECT_DIR}/scripts/generate_voiceover.py --parse-topic "$ARGUMENTS"
@@ -99,7 +76,7 @@ output/<slug>/
   video/scene-001.mp4 ...   (only if they said yes to HeyGen video)
 ```
 
-Create the folder first. After the last file, reply with the paths, provider, voice, scene count, audio runtime, and whether HeyGen video ran.
+Create the folder first. After the last file, reply with the paths, how the narrator sounds (plain English), scene count, audio runtime, and whether HeyGen video ran. Do not name engines unless they ask.
 
 ## Workflow
 
@@ -110,7 +87,7 @@ Pipeline:
 - [ ] 2. Research dossier → output/<slug>/01-research.md
 - [ ] 3. Narration script → output/<slug>/02-script.md
 - [ ] 4. Voiceover scenes → output/<slug>/03-voiceover.md
-- [ ] 4a. Check keys + ask yes/no (stop and wait — a key is not a yes)
+- [ ] 4a. Check keys + voice menu; ask in chat (stop and wait)
 - [ ] 4b. Audio → output/<slug>/audio/ (paid only if they said yes)
 - [ ] 5. Video prompts → output/<slug>/04-video-prompts.md
 - [ ] 5b. HeyGen video → output/<slug>/video/ (only if they said yes)
@@ -148,31 +125,52 @@ Read `${CLAUDE_SKILL_DIR}/voiceover-prompt.md`. Follow it exactly.
 - Preserve every word from `02-script.md`.
 - ~10-second scenes. End with `Total Scenes: [X]`.
 
-Write `03-voiceover.md`. Then check which paid keys exist:
+Write `03-voiceover.md`. Then load the voice menu and key check:
 
 ```bash
 ${CLAUDE_PROJECT_DIR}/tools/piper-env/bin/python ${CLAUDE_PROJECT_DIR}/scripts/generate_voiceover.py --check-keys
+${CLAUDE_PROJECT_DIR}/tools/piper-env/bin/python ${CLAUDE_PROJECT_DIR}/scripts/generate_voiceover.py --voice-menu
 ```
 
-**Stop and ask in chat.** The scripts do not prompt. A key in the environment is **not** a yes. Ask every question that applies, each as yes/no, and wait:
+**Stop and ask in chat.** The scripts do not prompt.
+
+If a paid key is set, ask every question that applies, each as yes/no:
 
 - If `elevenlabs.key` is true: **Generate ElevenLabs voiceover?** yes / no
 - If `heygen.key` is true: **Generate HeyGen voiceover?** yes / no
 - If `heygen.key` is true: **Generate HeyGen video?** yes / no
 
-Ask even if they already wrote `- elevenlabs` or `- heygen` in the topic.
+If they said **no** to every paid voiceover, or no paid key is set, ask the menu `question` using **only** the `say` lines. Example:
 
-Then run the matching script. Do not pass yes/no flags — calling the script **is** the yes.
+> How should this sound?
+> - Deep rumble, fast, a bit flat
+> - Natural documentary narrator
+> - More emotional, like someone telling you the story
+> - Fully acted, with breath and feeling
+
+They can pick a bullet or answer in their own words (“more human”, “not robotic”). Never name engines. Map the reply:
+
+```bash
+${CLAUDE_PROJECT_DIR}/tools/piper-env/bin/python ${CLAUDE_PROJECT_DIR}/scripts/generate_voiceover.py --resolve-intent "<their reply>"
+```
+
+If `ok` is false, ask one follow-up in the same plain language. Do not dump a tech menu.
+
+If `ok` is true and `installed` is false, run the `setup` command from the JSON, then `--voice-menu` again, then generate. If setup fails for that voice (common for the fully-acted option on a Mac), say that option is not available on this machine and offer the remaining `say` lines.
+
+Then run the matching script. Do not pass yes/no flags — calling the script **is** the yes. Use `python` from the resolve JSON (or `voice-menu.python[provider]`).
 
 ```bash
 ${CLAUDE_PROJECT_DIR}/tools/piper-env/bin/python ${CLAUDE_PROJECT_DIR}/scripts/generate_voiceover.py ${CLAUDE_PROJECT_DIR}/output/<slug>/03-voiceover.md --from-topic "$ARGUMENTS" --provider elevenlabs
 ```
 
-If they said yes to HeyGen voiceover, use `--provider heygen`. If they said no to every paid voiceover, use `--provider piper`. If they said yes to both paid voiceovers, use the topic provider if it is one of those; otherwise ElevenLabs.
+If they said yes to HeyGen voiceover, use `--provider heygen`. If they chose a local sound, use the resolve JSON `python` and `provider` (often `${CLAUDE_PROJECT_DIR}/tools/tts-env/bin/python` with `--provider chatterbox`). If they said yes to both paid voiceovers, use ElevenLabs unless they clearly asked for HeyGen.
 
 SQLite at `output/<slug>/audio/progress.sqlite` skips finished scenes. If this command fails partway, run the **same** command again. Do not delete the audio folder.
 
-If they asked for ElevenLabs or HeyGen in the topic but that key is missing, say so. Fall back to Piper only if they did not insist on the paid provider, or if they answered no.
+If they later say “redo it, more human” (or similar), resolve the new intent and regenerate with `--force`. Do not ask them to name an engine.
+
+If a paid key they wanted is missing, say so. Then ask the local sound question. Do not silently fall back to the rumble voice.
 
 ### Step 4 — Video prompts + optional HeyGen video
 
@@ -207,13 +205,14 @@ This commits the markdown package (`01`–`04`), rebases onto `origin` if needed
 - Never stop at a title. Never invent facts.
 - Treat real people with dignity.
 - After `03-voiceover.md`, check keys and ask yes/no for every paid API that is set. Do not treat a key as a yes.
-- Generate paid audio or HeyGen video only after they answer yes. Piper is the local fallback when they say no to paid voiceover.
+- Generate paid audio or HeyGen video only after they answer yes.
+- For local audio, ask how it should sound using only the `say` lines from `--voice-menu`. Map the reply with `--resolve-intent`. Never ask them to name an engine or type a `- provider` flag.
 - Always commit and push after video prompts so the run is not only on one machine.
 - Never generate anything until `scripts/require_github.sh` succeeds.
 - Never ask the user to edit `generate_voiceover.py` to pick a voice.
 
 ## Example
 
-User: `/youtube-documentary-pipeline jeffrey dahmer - elevenlabs`
+User: `/youtube-documentary-pipeline jeffrey dahmer`
 
-Writes `output/jeffrey-dahmer/` with ElevenLabs Adam audio.
+Writes `output/jeffrey-dahmer/` after asking how the narrator should sound.

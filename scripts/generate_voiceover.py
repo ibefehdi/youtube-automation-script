@@ -1,20 +1,13 @@
 #!/usr/bin/env python3
-"""Generate documentary voiceover audio with Piper, ElevenLabs, or HeyGen.
+"""Generate documentary voiceover audio.
 
-Resume is stored in SQLite next to the audio files. A failed run continues
-from the first unfinished scene.
+Local engines: Piper, Kokoro, Chatterbox, Orpheus.
+Paid engines: ElevenLabs, HeyGen.
 
-The AI asks yes/no in chat before calling this script. The script
-itself does not prompt.
+The user describes how the narrator should sound. The AI maps that to
+--provider. This script does not prompt.
 
-Topic flags (no code changes needed):
-
-  jeffrey dahmer
-  jeffrey dahmer - piper
-  jeffrey dahmer - elevenlabs
-  jeffrey dahmer - elevenlabs - adam
-  jeffrey dahmer - heygen
-  jeffrey dahmer - heygen - brian
+Resume is stored in SQLite next to the audio files.
 
 Keys: ELEVENLABS_API_KEY and/or HEYGEN_API_KEY in the environment or .env
 """
@@ -41,15 +34,25 @@ from pathlib import Path
 import numpy as np
 
 from pipeline_lib import (
+    DEFAULT_CHATTERBOX_CFG,
+    DEFAULT_CHATTERBOX_EXAGGERATION,
     DEFAULT_ELEVEN_VOICE,
     DEFAULT_HEYGEN_VOICE,
+    DEFAULT_KOKORO_VOICE,
+    DEFAULT_LOCAL_PROVIDER,
+    DEFAULT_ORPHEUS_VOICE,
     ELEVENLABS_KEY_NAME,
     HEYGEN_KEY_NAME,
+    NARRATOR_WAV,
     ROOT,
     env_key,
     parse_topic,
     parse_voiceover,
     print_check_keys,
+    print_resolve_intent,
+    print_voice_menu,
+    python_for_provider,
+    tts_python,
 )
 
 VOICES_DIR = ROOT / "tools" / "piper-voices"
@@ -57,6 +60,8 @@ DEFAULT_PIPER = "en_US-ryan-high"
 FALLBACK_PIPER = "en_US-lessac-medium"
 ELEVEN_PCM_RATE = 22050
 HEYGEN_PCM_RATE = 22050
+KOKORO_RATE = 24000
+ORPHEUS_RATE = 24000
 
 VOICE_ID_RE = re.compile(r"^[A-Za-z0-9]{16,28}$")
 HEYGEN_VOICE_ID_RE = re.compile(r"^[A-Fa-f0-9]{24,40}$")
@@ -395,6 +400,147 @@ def synthesize_piper(text: str, voice, syn_config) -> tuple[np.ndarray, int]:
     return np.concatenate(chunks), sample_rate
 
 
+def require_tts_env(package: str, provider: str) -> None:
+    hint = tts_python() or (ROOT / "tools" / "tts-env" / "bin" / "python")
+    raise SystemExit(
+        f"{package} is not on this Python. Install local voices, then rerun:\n"
+        f"  bash {ROOT / 'scripts' / 'setup_local_tts.sh'}\n"
+        f"  {hint} scripts/generate_voiceover.py ... --provider {provider}"
+    )
+
+
+def torch_device() -> str:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "cuda"
+        mps = getattr(torch.backends, "mps", None)
+        if mps is not None and mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
+
+
+def to_mono_float(audio) -> np.ndarray:
+    if hasattr(audio, "detach"):
+        audio = audio.detach().cpu().float().numpy()
+    arr = np.asarray(audio, dtype=np.float32)
+    if arr.ndim > 1:
+        arr = np.squeeze(arr)
+        if arr.ndim > 1:
+            arr = arr[0]
+    peak = float(np.max(np.abs(arr))) if arr.size else 0.0
+    if peak > 1.05:
+        arr = arr / peak
+    return arr.astype(np.float32)
+
+
+def load_kokoro(voice: str):
+    try:
+        from kokoro import KPipeline
+    except ImportError:
+        require_tts_env("Kokoro", "kokoro")
+    pipeline = KPipeline(lang_code="a")
+    print(f"Provider kokoro  voice {voice}  device {torch_device()}")
+    return pipeline, voice
+
+
+def synthesize_kokoro(text: str, pipeline, voice: str) -> tuple[np.ndarray, int]:
+    chunks: list[np.ndarray] = []
+    for item in pipeline(text, voice=voice):
+        audio = item[2] if isinstance(item, (tuple, list)) and len(item) >= 3 else item
+        chunk = to_mono_float(audio)
+        if chunk.size:
+            chunks.append(chunk)
+    if not chunks:
+        return np.zeros(0, dtype=np.float32), KOKORO_RATE
+    return np.concatenate(chunks), KOKORO_RATE
+
+
+def load_chatterbox(exaggeration: float, cfg_weight: float):
+    try:
+        from chatterbox.tts import ChatterboxTTS
+    except ImportError:
+        require_tts_env("Chatterbox", "chatterbox")
+    device = torch_device()
+    model = None
+    last_error: Exception | None = None
+    for candidate in (device, "cpu") if device != "cpu" else ("cpu",):
+        try:
+            model = ChatterboxTTS.from_pretrained(device=candidate)
+            device = candidate
+            break
+        except Exception as exc:
+            last_error = exc
+    if model is None:
+        raise SystemExit(f"Could not load Chatterbox: {last_error}")
+    prompt = str(NARRATOR_WAV) if NARRATOR_WAV.exists() else None
+    label = "narrator" if prompt else "default"
+    print(
+        f"Provider chatterbox  voice {label}  device {device}  "
+        f"exaggeration {exaggeration}  cfg {cfg_weight}"
+    )
+    return model, prompt, label
+
+
+def synthesize_chatterbox(
+    text: str,
+    model,
+    prompt: str | None,
+    exaggeration: float,
+    cfg_weight: float,
+) -> tuple[np.ndarray, int]:
+    kwargs: dict = {"exaggeration": exaggeration, "cfg_weight": cfg_weight}
+    if prompt:
+        kwargs["audio_prompt_path"] = prompt
+    wav = model.generate(text, **kwargs)
+    rate = int(getattr(model, "sr", None) or getattr(model, "sample_rate", 24000))
+    return to_mono_float(wav), rate
+
+
+def load_orpheus(voice: str):
+    try:
+        from orpheus_tts import OrpheusModel
+    except ImportError:
+        require_tts_env("Orpheus", "orpheus")
+    device = torch_device()
+    last_error: Exception | None = None
+    model = None
+    for name in (
+        "canopylabs/orpheus-tts-0.1-finetune-prod",
+        "canopylabs/orpheus-3b-0.1-ft",
+    ):
+        try:
+            model = OrpheusModel(model_name=name, max_model_len=2048)
+            break
+        except Exception as exc:
+            last_error = exc
+    if model is None:
+        raise SystemExit(
+            f"Could not load Orpheus ({last_error}). "
+            "It needs a CUDA GPU (vLLM). Run setup on the machine with the 5080."
+        )
+    print(f"Provider orpheus  voice {voice}  device {device}")
+    return model, voice
+
+
+def synthesize_orpheus(text: str, model, voice: str) -> tuple[np.ndarray, int]:
+    parts: list[np.ndarray] = []
+    for chunk in model.generate_speech(prompt=text, voice=voice):
+        if chunk is None:
+            continue
+        if isinstance(chunk, (bytes, bytearray, memoryview)):
+            pcm = np.frombuffer(chunk, dtype=np.int16)
+            parts.append(pcm.astype(np.float32) / 32767.0)
+        else:
+            parts.append(to_mono_float(chunk))
+    if not parts:
+        return np.zeros(0, dtype=np.float32), ORPHEUS_RATE
+    return np.concatenate(parts), ORPHEUS_RATE
+
+
 def synthesize_eleven(text: str, voice_id: str, key: str) -> tuple[np.ndarray, int]:
     url = (
         f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
@@ -615,12 +761,19 @@ def main() -> int:
     parser.add_argument("input", nargs="?", help="03-voiceover.md or a plain script")
     parser.add_argument("--parse-topic", help="Print topic/provider/voice JSON and exit")
     parser.add_argument("--check-keys", action="store_true", help="Print which paid API keys are set and exit")
-    parser.add_argument("--from-topic", help="Raw user topic, e.g. 'jeffrey dahmer - elevenlabs - adam'")
+    parser.add_argument("--voice-menu", action="store_true", help="Print plain-English voice options JSON and exit")
+    parser.add_argument("--resolve-intent", help="Map a plain-English voice reply to a provider and exit")
+    parser.add_argument("--from-topic", help="Raw user topic, e.g. 'jeffrey dahmer'")
     parser.add_argument("--output-dir", help="Directory for WAV files")
-    parser.add_argument("--provider", choices=["piper", "elevenlabs", "heygen"])
-    parser.add_argument("--voice", default=None, help="Piper model, ElevenLabs/HeyGen name, alias, or voice ID")
+    parser.add_argument(
+        "--provider",
+        choices=["piper", "kokoro", "chatterbox", "orpheus", "elevenlabs", "heygen"],
+    )
+    parser.add_argument("--voice", default=None, help="Engine voice name, alias, or ID")
     parser.add_argument("--semitones", type=float, default=-3.5)
     parser.add_argument("--length-scale", type=float, default=1.15)
+    parser.add_argument("--exaggeration", type=float, default=DEFAULT_CHATTERBOX_EXAGGERATION)
+    parser.add_argument("--cfg-weight", type=float, default=DEFAULT_CHATTERBOX_CFG)
     parser.add_argument("--pause", type=float, default=0.45)
     parser.add_argument("--long-pause", type=float, default=1.15)
     parser.add_argument("--no-deep", action="store_true")
@@ -631,6 +784,14 @@ def main() -> int:
         print_check_keys()
         return 0
 
+    if args.voice_menu:
+        print_voice_menu()
+        return 0
+
+    if args.resolve_intent is not None:
+        print_resolve_intent(args.resolve_intent)
+        return 0
+
     if args.parse_topic is not None:
         print(json.dumps(parse_topic(args.parse_topic), indent=2))
         return 0
@@ -639,7 +800,7 @@ def main() -> int:
         parser.error("Pass a voiceover file")
 
     topic_meta = parse_topic(args.from_topic) if args.from_topic else None
-    provider = args.provider or (topic_meta["provider"] if topic_meta else "piper")
+    provider = args.provider or (topic_meta["provider"] if topic_meta else DEFAULT_LOCAL_PROVIDER)
     voice_hint = args.voice or (topic_meta["voice"] if topic_meta else "")
 
     input_path = Path(args.input).resolve()
@@ -657,10 +818,16 @@ def main() -> int:
         "no_deep": args.no_deep,
         "pause": args.pause,
         "long_pause": args.long_pause,
+        "exaggeration": args.exaggeration,
+        "cfg_weight": args.cfg_weight,
     }
 
     piper_voice = None
     syn_config = None
+    kokoro_pipeline = None
+    chatterbox_model = None
+    chatterbox_prompt = None
+    orpheus_model = None
     eleven_key = ""
     hey_key = ""
     resolved_voice = voice_hint
@@ -670,25 +837,38 @@ def main() -> int:
             from piper import PiperVoice
             from piper.config import SynthesisConfig
         except ImportError:
+            piper_py = python_for_provider("piper")
             raise SystemExit(
                 "Piper is not on this Python. Run with:\n"
-                f"  {ROOT / 'tools' / 'piper-env' / 'Scripts' / 'python.exe'} scripts/generate_voiceover.py ..."
+                f"  {piper_py} scripts/generate_voiceover.py ..."
             )
         model_path = resolve_piper_voice(voice_hint or None)
         resolved_voice = model_path.stem
         piper_voice, device = load_piper_voice(model_path)
         print(f"Provider piper  voice {model_path.name}  device {device}")
         syn_config = SynthesisConfig(length_scale=args.length_scale, volume=0.95)
+    elif provider == "kokoro":
+        resolved_voice = voice_hint.strip() or DEFAULT_KOKORO_VOICE
+        kokoro_pipeline, resolved_voice = load_kokoro(resolved_voice)
+    elif provider == "chatterbox":
+        chatterbox_model, chatterbox_prompt, resolved_voice = load_chatterbox(
+            args.exaggeration, args.cfg_weight
+        )
+    elif provider == "orpheus":
+        resolved_voice = voice_hint.strip() or DEFAULT_ORPHEUS_VOICE
+        orpheus_model, resolved_voice = load_orpheus(resolved_voice)
     elif provider == "elevenlabs":
         eleven_key = elevenlabs_key()
         voice_id, label = resolve_eleven_voice(voice_hint, eleven_key)
         resolved_voice = voice_id
         print(f"Provider elevenlabs  voice {label} ({voice_id})")
-    else:
+    elif provider == "heygen":
         hey_key = heygen_key()
         voice_id, label = resolve_heygen_voice(voice_hint, hey_key)
         resolved_voice = voice_id
         print(f"Provider heygen  voice {label} ({voice_id})")
+    else:
+        raise SystemExit(f"Unknown provider: {provider}")
 
     conn = connect_db(out_dir / "progress.sqlite")
     job_id = get_or_create_job(
@@ -726,6 +906,25 @@ def main() -> int:
                     if not args.no_deep:
                         audio = pitch_shift(audio, args.semitones)
                         audio = add_warmth(audio, sample_rate)
+                    write_wav(wav_path, audio, sample_rate)
+                elif provider == "kokoro":
+                    audio, sample_rate = synthesize_kokoro(
+                        scene["text"], kokoro_pipeline, resolved_voice
+                    )
+                    write_wav(wav_path, audio, sample_rate)
+                elif provider == "chatterbox":
+                    audio, sample_rate = synthesize_chatterbox(
+                        scene["text"],
+                        chatterbox_model,
+                        chatterbox_prompt,
+                        args.exaggeration,
+                        args.cfg_weight,
+                    )
+                    write_wav(wav_path, audio, sample_rate)
+                elif provider == "orpheus":
+                    audio, sample_rate = synthesize_orpheus(
+                        scene["text"], orpheus_model, resolved_voice
+                    )
                     write_wav(wav_path, audio, sample_rate)
                 elif provider == "elevenlabs":
                     audio, sample_rate = synthesize_eleven(scene["text"], resolved_voice, eleven_key)

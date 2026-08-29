@@ -8,6 +8,10 @@ tools/.env
 tools/piper-env/
 tools/piper-voices/*.onnx
 
+# Local Kokoro / Chatterbox / Orpheus runtime
+tools/tts-env/
+tools/voices/*.wav
+
 # Generated audio, video, and resume DB
 output/**/audio/
 output/**/video/
