@@ -63,7 +63,7 @@ or name the skill:
 /youtube-documentary-pipeline the silk road - dark web
 ```
 
-The agent researches the story, writes the script, splits the voiceover, generates audio, then writes video prompts. It should not stop for approval between steps.
+The agent researches the story, writes the script, splits the voiceover, generates audio, writes video prompts, then **commits and pushes** the markdown package so the run is not stuck on one machine. It should not stop for approval between steps.
 
 ### Audio only (if the markdown already exists)
 
@@ -190,6 +190,32 @@ tools/piper-env/bin/python scripts/generate_voiceover.py \
 
 ---
 
+## Auto-push (do not lose a run)
+
+Every pipeline run ends with `scripts/save_to_git.sh`. That script:
+
+1. Adds `output/<slug>/01-research.md` through `04-video-prompts.md`
+2. Commits with a message like `Save documentary package: jeffrey-dahmer`
+3. Pushes the current branch to `origin` (SSH, as already set up)
+
+Audio WAVs, Piper models, and `.env` stay **local**. They are gitignored on purpose (too large / secret). The text history — research, script, timed voiceover, video prompts — is what gets pushed.
+
+You do not run this yourself when using the skill. To save a folder by hand:
+
+```bash
+bash scripts/save_to_git.sh the-silk-road-dark-web "the silk road - dark web"
+```
+
+Needs:
+
+- A git repo (already initialized)
+- `origin` pointing at GitHub over SSH, e.g. `git@github.com:ibefehdi/youtube-automation-script.git`
+- Permission to push that repo (the `ibefehdi` key)
+
+If the network blips, the commit is still on disk. Run the same `save_to_git.sh` line again, or `git push`. The script never force-pushes.
+
+---
+
 ## First-time setup
 
 You need **Python 3.12** (3.14 can break Piper wheels).
@@ -251,6 +277,7 @@ youtube/
 
   scripts/
     generate_voiceover.py       Piper + ElevenLabs + SQLite resume
+    save_to_git.sh              Commit markdown + push after every run
 
   tools/
     piper-env/                  Python venv with piper-tts

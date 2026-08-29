@@ -94,6 +94,7 @@ Pipeline:
 - [ ] 3. Voiceover scenes → output/<slug>/03-voiceover.md
 - [ ] 3b. Audio (immediately after 3) → output/<slug>/audio/
 - [ ] 4. Video prompts → output/<slug>/04-video-prompts.md
+- [ ] 5. Commit and push to git (always)
 ```
 
 Prompt files live in `${CLAUDE_SKILL_DIR}/`.
@@ -146,12 +147,23 @@ Read `${CLAUDE_SKILL_DIR}/video-prompts.md`. Follow it exactly.
 
 Write `04-video-prompts.md` as the prompts only.
 
+### Step 5 — Save history to git
+
+Always run this after Step 4, even if audio had errors. Do not skip. Do not wait for the user.
+
+```bash
+bash ${CLAUDE_PROJECT_DIR}/scripts/save_to_git.sh <slug> "$ARGUMENTS"
+```
+
+This commits the markdown package (`01`–`04`) and pushes the current branch to `origin`. WAV files stay local (gitignored). If push fails, report the error; the local commit must still exist. Never force-push. Never skip hooks. Never change git config.
+
 ## Hard rules
 
 - One topic → one story. Strip only the provider/voice suffix.
 - Never stop at a title. Never invent facts.
 - Treat real people with dignity.
 - Always generate audio as soon as `03-voiceover.md` exists, before video prompts.
+- Always commit and push after video prompts so the run is not only on one machine.
 - Never ask the user to edit `generate_voiceover.py` to pick a voice.
 
 ## Example
