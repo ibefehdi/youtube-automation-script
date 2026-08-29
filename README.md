@@ -174,7 +174,7 @@ Paid keys still get a yes/no. Local is the fallback when you say no, after the s
 
 ## Voices
 
-You pick by **sound**, in chat. First time on a machine, the richer local voices need:
+You pick by **sound**, in chat. First time on a machine, follow **[INSTALL.md](INSTALL.md)** (Windows Blackwell / 5080, or M-series Mac), or:
 
 ```bash
 bash scripts/setup_local_tts.sh
@@ -300,6 +300,8 @@ If two people finish a run at the same time, the script rebases onto `origin` fi
 
 ## First-time setup
 
+Step-by-step for **Windows + Blackwell (RTX 5080)** and **M-series Macs** is in **[INSTALL.md](INSTALL.md)**.
+
 You need **Python 3.12** (3.14 can break Piper wheels).
 
 ### 1. Piper environment
@@ -360,6 +362,7 @@ afplay /tmp/piper-test.wav
 ```
 youtube/
   README.md
+  INSTALL.md                    Windows Blackwell + M-series Mac voice setup
   Research.docx                 Original research prompt
   Script.docx                   Original script prompt
   Voice Over Script.docx        Original scene-split prompt
