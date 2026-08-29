@@ -10,6 +10,8 @@ Give this project **one topic**. It turns that topic into a full YouTube documen
 
 You do not edit code to pick a voice or a provider. That is all in the topic line.
 
+**You need a GitHub account signed in on the CLI.** The skill checks this first and will not generate anything until `gh auth login` or SSH to GitHub succeeds.
+
 ```
 the silk road - dark web
 jeffrey dahmer - elevenlabs
@@ -63,7 +65,7 @@ or name the skill:
 /youtube-documentary-pipeline the silk road - dark web
 ```
 
-The agent researches the story, writes the script, splits the voiceover, generates audio, writes video prompts, then **commits and pushes** the markdown package so the run is not stuck on one machine. It should not stop for approval between steps.
+The agent **first checks that GitHub is signed in**. If not, it stops and asks you to log in. Only then does it research, write the script, split the voiceover, generate audio, write video prompts, and **commit and push**.
 
 ### Audio only (if the markdown already exists)
 
@@ -85,6 +87,36 @@ Listen:
 ```bash
 afplay output/the-silk-road-dark-web/audio/full-voiceover.wav
 ```
+
+---
+
+## Hard requirement: GitHub on the CLI
+
+The pipeline **will not start** until this computer is signed in to GitHub. That is checked first with `scripts/require_github.sh`.
+
+If the check fails, the agent **stops**. It will not write research, scripts, or audio. Sign in, then send the same topic again.
+
+```bash
+# Easiest
+brew install gh
+gh auth login
+gh auth status
+
+# Or SSH
+ssh-keygen -t ed25519 -C "you@email.com"
+# GitHub → Settings → SSH and GPG keys → paste ~/.ssh/id_ed25519.pub
+ssh -T git@github.com
+```
+
+Each person uses **their own** GitHub account. The repo owner invites them as a collaborator (Write). Accept the invite before running the skill.
+
+Manual check:
+
+```bash
+bash scripts/require_github.sh
+```
+
+Exit code 0 means generation is allowed.
 
 ---
 
@@ -327,6 +359,7 @@ youtube/
 
   scripts/
     generate_voiceover.py       Piper + ElevenLabs + SQLite resume
+    require_github.sh           Hard stop until GitHub CLI/SSH is signed in
     save_to_git.sh              Commit markdown + push after every run
 
   tools/

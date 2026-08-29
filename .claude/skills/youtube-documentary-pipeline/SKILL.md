@@ -16,7 +16,9 @@ allowed-tools: Read Write Edit Glob Grep WebSearch WebFetch Bash
 
 # YouTube Documentary Pipeline
 
-One topic in. Research, script, timed voiceover, spoken audio, then video prompts. Do not ask clarifying questions. Do not stop after titles or a summary.
+One topic in. Research, script, timed voiceover, spoken audio, then video prompts. Do not stop after titles or a summary.
+
+**Hard requirement:** GitHub must be signed in on this machine **before** any generation. Run the check first. If it fails, stop. Ask the user to sign in. Do not write research, scripts, audio, or prompts until they have signed in and you re-run the check successfully. This is the one time you should pause and talk to the user.
 
 ## Topic syntax (hands-off)
 
@@ -61,7 +63,15 @@ If \$ARGUMENTS is empty, use the rest of the user message.
 
 ## First command
 
-Parse the raw topic. Use this JSON for the story title, folder slug, provider, and voice. Do not put `elevenlabs` / `piper` / the voice name into the research topic.
+GitHub sign-in is a **hard gate**. Run this before anything else:
+
+```bash
+bash ${CLAUDE_PROJECT_DIR}/scripts/require_github.sh
+```
+
+If it exits non-zero: do **not** parse the topic, do **not** create `output/`, do **not** research. Show the script’s instructions, tell them to sign in with `gh auth login` or SSH, then invoke the skill again. Only continue after a later run of `require_github.sh` exits 0.
+
+Then parse the raw topic. Use this JSON for the story title, folder slug, provider, and voice. Do not put `elevenlabs` / `piper` / the voice name into the research topic.
 
 ```bash
 ${CLAUDE_PROJECT_DIR}/tools/piper-env/bin/python ${CLAUDE_PROJECT_DIR}/scripts/generate_voiceover.py --parse-topic "$ARGUMENTS"
@@ -88,13 +98,14 @@ Create the folder first. After the last file, reply with the paths, provider, vo
 
 ```
 Pipeline:
-- [ ] 0. Parse topic → story, slug, provider, voice
-- [ ] 1. Research dossier → output/<slug>/01-research.md
-- [ ] 2. Narration script → output/<slug>/02-script.md
-- [ ] 3. Voiceover scenes → output/<slug>/03-voiceover.md
-- [ ] 3b. Audio (immediately after 3) → output/<slug>/audio/
-- [ ] 4. Video prompts → output/<slug>/04-video-prompts.md
-- [ ] 5. Commit and push to git (always)
+- [ ] 0. GitHub sign-in check (hard stop if it fails)
+- [ ] 1. Parse topic → story, slug, provider, voice
+- [ ] 2. Research dossier → output/<slug>/01-research.md
+- [ ] 3. Narration script → output/<slug>/02-script.md
+- [ ] 4. Voiceover scenes → output/<slug>/03-voiceover.md
+- [ ] 4b. Audio (immediately after 4) → output/<slug>/audio/
+- [ ] 5. Video prompts → output/<slug>/04-video-prompts.md
+- [ ] 6. Commit and push to git (always)
 ```
 
 Prompt files live in `${CLAUDE_SKILL_DIR}/`.
@@ -164,6 +175,7 @@ This commits the markdown package (`01`–`04`), rebases onto `origin` if needed
 - Treat real people with dignity.
 - Always generate audio as soon as `03-voiceover.md` exists, before video prompts.
 - Always commit and push after video prompts so the run is not only on one machine.
+- Never generate anything until `scripts/require_github.sh` succeeds.
 - Never ask the user to edit `generate_voiceover.py` to pick a voice.
 
 ## Example
