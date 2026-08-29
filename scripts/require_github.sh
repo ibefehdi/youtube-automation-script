@@ -52,23 +52,37 @@ echo "origin: $ORIGIN"
 signed_in=0
 identity=""
 
-if command -v gh >/dev/null 2>&1; then
-  if gh auth status >/dev/null 2>&1; then
-    signed_in=1
-    identity="$(gh api user --jq .login 2>/dev/null || echo "gh")"
-    echo "GitHub CLI signed in as: $identity"
-  fi
-fi
-
-if [[ "$signed_in" -eq 0 ]]; then
+try_ssh() {
+  local ssh_out
   ssh_out="$(ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -T git@github.com 2>&1 || true)"
   if echo "$ssh_out" | grep -qi "successfully authenticated"; then
     signed_in=1
     identity="$(echo "$ssh_out" | sed -n 's/.*Hi \([^!]*\)!.*/\1/p')"
     echo "GitHub SSH signed in as: ${identity:-unknown}"
-  else
-    echo "$ssh_out" >&2
+    return 0
   fi
+  echo "$ssh_out" >&2
+  return 1
+}
+
+try_gh() {
+  if ! command -v gh >/dev/null 2>&1; then
+    return 1
+  fi
+  if gh auth status >/dev/null 2>&1; then
+    signed_in=1
+    identity="$(gh api user --jq .login 2>/dev/null || echo "gh")"
+    echo "GitHub CLI signed in as: $identity"
+    return 0
+  fi
+  return 1
+}
+
+# Prefer the method that matches origin, so the check is the same account that will push.
+if [[ "$ORIGIN" == git@* || "$ORIGIN" == ssh://* ]]; then
+  try_ssh || try_gh || true
+else
+  try_gh || try_ssh || true
 fi
 
 if [[ "$signed_in" -eq 0 ]]; then
