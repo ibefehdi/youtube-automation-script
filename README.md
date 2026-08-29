@@ -5,10 +5,10 @@ Give this project **one topic**. It turns that topic into a full YouTube documen
 1. Deep research dossier  
 2. 15,000–18,000 character narration script  
 3. Timed 10-second voiceover scenes  
-4. Spoken audio (local Piper or ElevenLabs)  
-5. AI video prompts for every scene (Runway, Kling, Pika, Luma, Veo)
+4. Spoken audio (local Piper, ElevenLabs, or HeyGen)  
+5. AI video prompts for every scene (and optional HeyGen clips if you say yes)
 
-You do not edit code to pick a voice or a provider. That is all in the topic line.
+You do not edit code to pick a voice or a provider. That is all in the topic line. If `ELEVENLABS_API_KEY` or `HEYGEN_API_KEY` is set, the AI still asks **yes/no** in chat before it runs that script.
 
 **You need a GitHub account signed in on the CLI.** The skill checks this first and will not generate anything until `gh auth login` or SSH to GitHub succeeds.
 
@@ -16,6 +16,7 @@ You do not edit code to pick a voice or a provider. That is all in the topic lin
 the silk road - dark web
 jeffrey dahmer - elevenlabs
 jeffrey dahmer - elevenlabs - daniel
+jeffrey dahmer - heygen
 ```
 
 ---
@@ -37,6 +38,9 @@ output/<slug>/
     full-voiceover.wav    All scenes + pauses, one mix
     manifest.json         Scene list, durations, text
     progress.sqlite       Resume database
+  video/                  HeyGen clips, only if you said yes
+    scene-001.mp4
+    progress.sqlite
 ```
 
 A finished 15k–18k character script is roughly **12–18 minutes** of narration and about **70–120 scenes**.
@@ -65,7 +69,7 @@ or name the skill:
 /youtube-documentary-pipeline the silk road - dark web
 ```
 
-The agent **first checks that GitHub is signed in**. If not, it stops and asks you to log in. Only then does it research, write the script, split the voiceover, generate audio, write video prompts, and **commit and push**.
+The agent **first checks that GitHub is signed in**. If not, it stops and asks you to log in. After the voiceover script is written, it checks for API keys and asks **yes/no** in chat (ElevenLabs voiceover, HeyGen voiceover, HeyGen video). It only runs those scripts after you answer. Piper is the local fallback if you say no to paid voiceover.
 
 ### Audio only (if the markdown already exists)
 
@@ -80,6 +84,16 @@ tools/piper-env/bin/python scripts/generate_voiceover.py \
 tools/piper-env/bin/python scripts/generate_voiceover.py \
   output/the-silk-road-dark-web/03-voiceover.md \
   --from-topic "the silk road - dark web - elevenlabs"
+
+# HeyGen voiceover
+tools/piper-env/bin/python scripts/generate_voiceover.py \
+  output/the-silk-road-dark-web/03-voiceover.md \
+  --from-topic "the silk road - dark web - heygen"
+
+# HeyGen video clips (after 04-video-prompts.md exists)
+tools/piper-env/bin/python scripts/generate_video.py \
+  output/the-silk-road-dark-web/04-video-prompts.md \
+  --from-topic "the silk road - dark web"
 ```
 
 Listen:
@@ -133,7 +147,7 @@ Exit code 0 means generation is allowed.
 
 ## Topic syntax
 
-The last `- piper` or `- elevenlabs` is a **flag**, not part of the story. Everything before it is the case you want researched.
+The last `- piper`, `- elevenlabs`, or `- heygen` is a **flag**, not part of the story. Everything before it is the case you want researched.
 
 | You type | Story researched | Audio |
 |---|---|---|
@@ -143,6 +157,8 @@ The last `- piper` or `- elevenlabs` is a **flag**, not part of the story. Every
 | `jeffrey dahmer - elevenlabs - daniel` | Jeffrey Dahmer | ElevenLabs Daniel |
 | `jeffrey dahmer - elevenlabs - deep male` | Jeffrey Dahmer | ElevenLabs Adam |
 | `el chapo - elevenlabs - pNInz6obpgDQGcFmaJgB` | El Chapo | That voice ID |
+| `jeffrey dahmer - heygen` | Jeffrey Dahmer | HeyGen documentary male |
+| `jeffrey dahmer - heygen - brian` | Jeffrey Dahmer | HeyGen voice named Brian |
 
 Check what a line will do without generating audio:
 
@@ -210,6 +226,24 @@ If you only write `- elevenlabs` and nothing else, the voice is **Adam** (deep d
 | `bill`, `gravel` | Bill |
 | any other name | Searched in your ElevenLabs account |
 | a voice ID | Used as-is |
+
+### HeyGen (paid, voiceover and optional video)
+
+Needs a key once:
+
+```bash
+echo 'HEYGEN_API_KEY=your_key_here' >> .env
+```
+
+or:
+
+```bash
+export HEYGEN_API_KEY=your_key_here
+```
+
+If you only write `- heygen`, the script picks a Starfish-compatible male English voice (prefers **Chill Brian**). Any other name is searched in your HeyGen voice list. A 32-character hex ID is used as-is.
+
+Having the key does **not** start a run. In the skill, the AI asks two yes/no questions: HeyGen voiceover, and HeyGen video. Video clips come from `04-video-prompts.md` via Video Agent (landscape, exact narration, no captions). Each clip can take several minutes and uses credits.
 
 ---
 
@@ -369,7 +403,9 @@ youtube/
   Generate Video Prompts.docx   Original visual-prompt prompt
 
   scripts/
-    generate_voiceover.py       Piper + ElevenLabs + SQLite resume
+    generate_voiceover.py       Piper + ElevenLabs + HeyGen TTS + SQLite resume
+    generate_video.py           HeyGen Video Agent clips + SQLite resume
+    pipeline_lib.py             Topic parse, key check, prompt parsers
     require_github.sh                 Hard stop until GitHub CLI/SSH is signed in
     setup_github_gate_protection.sh   Install GitHub rulesets that reject gate removal
     save_to_git.sh                    Commit markdown + push after every run
@@ -418,11 +454,11 @@ Every word of the script, split at natural breaks into ~**25 words / 10 seconds*
 
 ### 4. Audio
 
-`scripts/generate_voiceover.py` reads `03-voiceover.md` and writes WAVs. Piper is local and free. ElevenLabs is optional and selected in the topic line.
+`scripts/generate_voiceover.py` reads `03-voiceover.md` and writes WAVs. Piper is local and free. ElevenLabs and HeyGen are optional and selected in the topic line — but the AI still asks yes/no in chat before it runs a paid script.
 
 ### 5. Video prompts
 
-One prompt per voiceover scene: narration copied exactly, plus setting, lighting, camera, mood. Style is dark, desaturated, true-crime documentary. These are meant for Runway, Kling, Pika, Luma, or Google Veo. **Google Flow has no public API**; clip generation is still a separate step.
+One prompt per voiceover scene: narration copied exactly, plus setting, lighting, camera, mood. Style is dark, desaturated, true-crime documentary. These are meant for Runway, Kling, Pika, Luma, or Google Veo. If you say yes to HeyGen video, `scripts/generate_video.py` also renders a clip per scene.
 
 ---
 
@@ -436,8 +472,9 @@ tools/piper-env/bin/python scripts/generate_voiceover.py INPUT.md [options]
 |---|---|
 | `--from-topic "..."` | Parse provider + voice from the topic line |
 | `--parse-topic "..."` | Print JSON and exit (no audio) |
-| `--provider piper \| elevenlabs` | Override provider |
-| `--voice NAME` | Piper model, ElevenLabs alias, name, or ID |
+| `--check-keys` | Print which paid API keys are set (JSON) and exit |
+| `--provider piper \| elevenlabs \| heygen` | Override provider |
+| `--voice NAME` | Piper model, ElevenLabs/HeyGen alias, name, or ID |
 | `--semitones -3.5` | Piper pitch (negative = deeper) |
 | `--length-scale 1.15` | Piper speed (`>1` = slower) |
 | `--pause 0.45` | Silence after `(pause)` |
@@ -446,20 +483,34 @@ tools/piper-env/bin/python scripts/generate_voiceover.py INPUT.md [options]
 | `--force` | Ignore SQLite and regenerate every scene |
 | `--output-dir DIR` | Where to write WAVs |
 
+## `generate_video.py` flags
+
+```bash
+tools/piper-env/bin/python scripts/generate_video.py INPUT.md [options]
+```
+
+| Flag | Meaning |
+|---|---|
+| `--from-topic "..."` | Story title for clip names |
+| `--check-keys` | Same key JSON as the voiceover script |
+| `--voice ID` | Optional HeyGen voice ID for Video Agent |
+| `--scenes 1-5` | Only these scene numbers |
+| `--max-scenes N` | Stop after N new renders |
+| `--force` | Ignore SQLite and re-render |
+| `--output-dir DIR` | Where to write MP4s |
+
 ---
 
 ## What is not automated yet
 
-- **Finished video.** You still generate clips in Flow / Veo / Kling / Runway from `04-video-prompts.md`, then edit them under the voiceover.  
+- **Finished edit.** HeyGen can render per-scene clips if you say yes. You still assemble them under the voiceover (and can still use Flow / Veo / Kling / Runway from `04-video-prompts.md`).  
 - **YouTube upload.**  
 - **Background music.** `full-voiceover.wav` is dry narration.
-
-A practical next step is: clip API (Veo or Kling) → `ffmpeg` to lay each clip under each scene WAV → concat.
 
 ---
 
 ## Notes
 
 - Treat real victims and families with care. The prompts forbid invented quotes and sensational gore.  
-- Piper is unlimited and offline. ElevenLabs bills per character; a 16k-character script is about one long video on a Starter plan.  
+- Piper is unlimited and offline. ElevenLabs bills per character; a 16k-character script is about one long video on a Starter plan. HeyGen bills for speech and for each Video Agent clip.  
 - Large files live under `tools/piper-env/`, `tools/piper-voices/`, and `output/`. Keep secrets in `.env`, not in git.
