@@ -404,6 +404,61 @@ def resolve_eleven_voice(hint: str, key: str) -> tuple[str, str]:
     )
 
 
+def prepare_cuda_dll_path() -> list[Path]:
+    """Expose pip-installed NVIDIA CUDA/cuDNN DLLs to onnxruntime on Windows."""
+    site = Path(sys.prefix) / "Lib" / "site-packages" / "nvidia"
+    candidates = [
+        site / "cu13" / "bin" / "x86_64",
+        site / "cudnn" / "bin",
+        site / "cu12" / "bin",
+        site / "cublas" / "bin",
+        site / "cuda_runtime" / "bin",
+    ]
+    found = [p for p in candidates if p.is_dir()]
+    if not found:
+        return []
+    path_parts = os.environ.get("PATH", "").split(os.pathsep)
+    prepend: list[str] = []
+    for folder in found:
+        text = str(folder)
+        if text not in path_parts:
+            prepend.append(text)
+        if hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(text)
+            except OSError:
+                pass
+    if prepend:
+        os.environ["PATH"] = os.pathsep.join(prepend + path_parts)
+    return found
+
+
+def cuda_available() -> bool:
+    prepare_cuda_dll_path()
+    try:
+        import onnxruntime as ort
+
+        return "CUDAExecutionProvider" in ort.get_available_providers()
+    except Exception:
+        return False
+
+
+def load_piper_voice(model_path: Path):
+    """Load Piper with CUDA when possible; fall back to CPU."""
+    from piper import PiperVoice
+
+    if cuda_available():
+        try:
+            voice = PiperVoice.load(str(model_path), use_cuda=True)
+            providers = list(getattr(voice.session, "get_providers", lambda: [])())
+            if any("CUDA" in str(p) for p in providers):
+                return voice, "cuda"
+            print("CUDA provider listed but session stayed on CPU; using CPU")
+        except Exception as exc:
+            print(f"CUDA load failed ({exc}); falling back to CPU")
+    return PiperVoice.load(str(model_path), use_cuda=False), "cpu"
+
+
 def synthesize_piper(text: str, voice, syn_config) -> tuple[np.ndarray, int]:
     chunks: list[np.ndarray] = []
     sample_rate = 22050
@@ -518,25 +573,8 @@ def main() -> int:
             )
         model_path = resolve_piper_voice(voice_hint or None)
         resolved_voice = model_path.stem
-        use_cuda = False
-        try:
-            import onnxruntime as ort
-
-            use_cuda = "CUDAExecutionProvider" in ort.get_available_providers()
-        except Exception:
-            use_cuda = False
-        if use_cuda:
-            try:
-                piper_voice = PiperVoice.load(str(model_path), use_cuda=True)
-                print(f"Provider piper  voice {model_path.name}  device cuda (RTX)")
-            except Exception as exc:
-                print(f"CUDA load failed ({exc}); falling back to CPU")
-                use_cuda = False
-                piper_voice = PiperVoice.load(str(model_path), use_cuda=False)
-                print(f"Provider piper  voice {model_path.name}  device cpu")
-        else:
-            piper_voice = PiperVoice.load(str(model_path), use_cuda=False)
-            print(f"Provider piper  voice {model_path.name}  device cpu")
+        piper_voice, device = load_piper_voice(model_path)
+        print(f"Provider piper  voice {model_path.name}  device {device}")
         syn_config = SynthesisConfig(length_scale=args.length_scale, volume=0.95)
     else:
         eleven_key = elevenlabs_key()

@@ -1,0 +1,43 @@
+# Fails if anyone removes or hollows out the GitHub hard-gate.
+# Pair with the repo ruleset from scripts/setup_github_gate_protection.sh
+# so pushes that delete the gate are rejected on GitHub.
+name: Protect GitHub gate
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  gate-must-exist:
+    name: GitHub gate files required
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify require_github.sh and skill hard-gates
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          SCRIPT="scripts/require_github.sh"
+          CLAUDE_SKILL=".claude/skills/youtube-documentary-pipeline/SKILL.md"
+          CURSOR_SKILL=".cursor/skills/youtube-documentary-pipeline/SKILL.md"
+
+          for f in "$SCRIPT" "$CLAUDE_SKILL" "$CURSOR_SKILL"; do
+            [[ -f "$f" ]] || fail "Missing required gate file: $f (do not remove)"
+          done
+
+          grep -q "Hard gate" "$SCRIPT" || fail "$SCRIPT must keep the Hard gate marker"
+          grep -q "GitHub sign-in is required" "$SCRIPT" || fail "$SCRIPT must keep the sign-in failure message"
+          grep -q "exit 1" "$SCRIPT" || fail "$SCRIPT must still exit 1 on failure"
+
+          for skill in "$CLAUDE_SKILL" "$CURSOR_SKILL"; do
+            grep -q "Hard requirement" "$skill" || fail "$skill must keep Hard requirement"
+            grep -q "require_github.sh" "$skill" || fail "$skill must still call require_github.sh"
+            grep -qi "hard gate" "$skill" || fail "$skill must keep hard gate language"
+            grep -qi "do not write research" "$skill" || fail "$skill must still forbid generation until sign-in"
+          done
+
+          echo "GitHub hard-gate files present and intact."

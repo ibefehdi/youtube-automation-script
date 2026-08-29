@@ -96,6 +96,17 @@ The pipeline **will not start** until this computer is signed in to GitHub. That
 
 If the check fails, the agent **stops**. It will not write research, scripts, or audio. Sign in, then send the same topic again.
 
+### Server-side: GitHub rejects removing the gate
+
+Local checks are not enough — someone could delete `require_github.sh` and push. After the workflow is on `main`, the **repo owner** turns on push rejection once:
+
+```bash
+gh auth login
+bash scripts/setup_github_gate_protection.sh
+```
+
+That installs GitHub rulesets so pushes that **change or delete** the gate files (`scripts/require_github.sh`, both pipeline `SKILL.md` files, and the protect workflow) are **rejected by GitHub**. Normal pipeline commits are unaffected. Admins can still bypass to update the gate on purpose. CI also fails if those files are missing or hollowed out.
+
 ```bash
 # Easiest
 brew install gh
@@ -359,8 +370,11 @@ youtube/
 
   scripts/
     generate_voiceover.py       Piper + ElevenLabs + SQLite resume
-    require_github.sh           Hard stop until GitHub CLI/SSH is signed in
-    save_to_git.sh              Commit markdown + push after every run
+    require_github.sh                 Hard stop until GitHub CLI/SSH is signed in
+    setup_github_gate_protection.sh   Install GitHub rulesets that reject gate removal
+    save_to_git.sh                    Commit markdown + push after every run
+    ../.github/workflows/
+      protect-github-gate.yml         CI fails if the gate files are missing/hollowed out
 
   tools/
     piper-env/                  Python venv with piper-tts
