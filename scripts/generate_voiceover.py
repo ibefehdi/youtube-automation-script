@@ -514,12 +514,29 @@ def main() -> int:
         except ImportError:
             raise SystemExit(
                 "Piper is not on this Python. Run with:\n"
-                f"  {ROOT / 'tools' / 'piper-env' / 'bin' / 'python'} scripts/generate_voiceover.py ..."
+                f"  {ROOT / 'tools' / 'piper-env' / 'Scripts' / 'python.exe'} scripts/generate_voiceover.py ..."
             )
         model_path = resolve_piper_voice(voice_hint or None)
         resolved_voice = model_path.stem
-        print(f"Provider piper  voice {model_path.name}")
-        piper_voice = PiperVoice.load(str(model_path))
+        use_cuda = False
+        try:
+            import onnxruntime as ort
+
+            use_cuda = "CUDAExecutionProvider" in ort.get_available_providers()
+        except Exception:
+            use_cuda = False
+        if use_cuda:
+            try:
+                piper_voice = PiperVoice.load(str(model_path), use_cuda=True)
+                print(f"Provider piper  voice {model_path.name}  device cuda (RTX)")
+            except Exception as exc:
+                print(f"CUDA load failed ({exc}); falling back to CPU")
+                use_cuda = False
+                piper_voice = PiperVoice.load(str(model_path), use_cuda=False)
+                print(f"Provider piper  voice {model_path.name}  device cpu")
+        else:
+            piper_voice = PiperVoice.load(str(model_path), use_cuda=False)
+            print(f"Provider piper  voice {model_path.name}  device cpu")
         syn_config = SynthesisConfig(length_scale=args.length_scale, volume=0.95)
     else:
         eleven_key = elevenlabs_key()
