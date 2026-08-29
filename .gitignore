@@ -8,11 +8,13 @@ tools/.env
 tools/piper-env/
 tools/piper-voices/*.onnx
 
-# Generated audio and resume DB
+# Generated audio, video, and resume DB
 output/**/audio/
+output/**/video/
 output/_piper-test/
 *.wav
 *.mp3
+*.mp4
 
 # Python
 __pycache__/

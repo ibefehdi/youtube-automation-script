@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Generate documentary voiceover audio with Piper (local) or ElevenLabs.
+"""Generate documentary voiceover audio with Piper, ElevenLabs, or HeyGen.
 
 Resume is stored in SQLite next to the audio files. A failed run continues
 from the first unfinished scene.
+
+The AI asks yes/no in chat before calling this script. The script
+itself does not prompt.
 
 Topic flags (no code changes needed):
 
@@ -10,10 +13,10 @@ Topic flags (no code changes needed):
   jeffrey dahmer - piper
   jeffrey dahmer - elevenlabs
   jeffrey dahmer - elevenlabs - adam
-  jeffrey dahmer - elevenlabs - daniel
-  jeffrey dahmer - elevenlabs - deep male
+  jeffrey dahmer - heygen
+  jeffrey dahmer - heygen - brian
 
-ElevenLabs key: export ELEVENLABS_API_KEY or put it in .env / tools/.env
+Keys: ELEVENLABS_API_KEY and/or HEYGEN_API_KEY in the environment or .env
 """
 
 from __future__ import annotations
@@ -23,10 +26,13 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
+import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import wave
 from datetime import datetime, timezone
@@ -34,24 +40,26 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent.parent
+from pipeline_lib import (
+    DEFAULT_ELEVEN_VOICE,
+    DEFAULT_HEYGEN_VOICE,
+    ELEVENLABS_KEY_NAME,
+    HEYGEN_KEY_NAME,
+    ROOT,
+    env_key,
+    parse_topic,
+    parse_voiceover,
+    print_check_keys,
+)
+
 VOICES_DIR = ROOT / "tools" / "piper-voices"
 DEFAULT_PIPER = "en_US-ryan-high"
 FALLBACK_PIPER = "en_US-lessac-medium"
 ELEVEN_PCM_RATE = 22050
+HEYGEN_PCM_RATE = 22050
 
-SCENE_RE = re.compile(r"^Scene\s+(\d+)\s*$", re.IGNORECASE)
-PAUSE_RE = re.compile(r"^\((long\s+pause|pause)\)\s*$", re.IGNORECASE)
-TOTAL_RE = re.compile(r"^Total Scenes:\s*\d+\s*$", re.IGNORECASE)
 VOICE_ID_RE = re.compile(r"^[A-Za-z0-9]{16,28}$")
-
-PROVIDERS = {
-    "elevenlabs": "elevenlabs",
-    "11labs": "elevenlabs",
-    "eleven": "elevenlabs",
-    "piper": "piper",
-    "local": "piper",
-}
+HEYGEN_VOICE_ID_RE = re.compile(r"^[A-Fa-f0-9]{24,40}$")
 
 # Hands-off aliases. User types these after "- elevenlabs -"
 ELEVEN_ALIASES = {
@@ -79,98 +87,6 @@ ELEVEN_ALIASES = {
     "rachel": "21m00Tcm4TlvDq8ikWAM",
     "sarah": "EXAVITQu4vr4xnSDxMaL",
 }
-
-DEFAULT_ELEVEN_VOICE = "adam"
-
-
-def load_dotenv() -> None:
-    for path in (ROOT / ".env", ROOT / "tools" / ".env"):
-        if not path.exists():
-            continue
-        for raw in path.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip("'").strip('"')
-            if key and key not in os.environ:
-                os.environ[key] = value
-
-
-def slugify(text: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return re.sub(r"-{2,}", "-", slug) or "topic"
-
-
-def parse_topic(raw: str) -> dict:
-    text = " ".join(raw.strip().split())
-    tokens = re.split(r"\s+-\s+", text)
-    provider = "piper"
-    voice = ""
-    topic_tokens = tokens
-
-    for i in range(len(tokens) - 1, -1, -1):
-        key = tokens[i].strip().lower()
-        if key in PROVIDERS:
-            provider = PROVIDERS[key]
-            voice = " - ".join(tokens[i + 1 :]).strip()
-            topic_tokens = tokens[:i]
-            break
-
-    topic = " - ".join(topic_tokens).strip() or text
-    if provider == "elevenlabs" and not voice:
-        voice = DEFAULT_ELEVEN_VOICE
-    return {
-        "topic": topic,
-        "slug": slugify(topic),
-        "provider": provider,
-        "voice": voice,
-    }
-
-
-def parse_voiceover(text: str) -> list[dict]:
-    lines = text.replace("\r\n", "\n").split("\n")
-    scenes: list[dict] = []
-    current: dict | None = None
-    body: list[str] = []
-
-    def flush() -> None:
-        nonlocal current, body
-        if current is None:
-            return
-        narr = " ".join(" ".join(body).split())
-        if narr:
-            current["text"] = narr
-            scenes.append(current)
-        current = None
-        body = []
-
-    for raw in lines:
-        line = raw.strip()
-        if not line or TOTAL_RE.match(line):
-            continue
-        scene_match = SCENE_RE.match(line)
-        if scene_match:
-            flush()
-            current = {"number": int(scene_match.group(1)), "pause": "pause"}
-            continue
-        pause_match = PAUSE_RE.match(line)
-        if pause_match and current is not None:
-            kind = pause_match.group(1).lower()
-            current["pause"] = "long" if "long" in kind else "pause"
-            continue
-        if current is not None:
-            body.append(line)
-
-    flush()
-    if scenes:
-        return scenes
-    plain = " ".join(text.split())
-    if not plain:
-        raise SystemExit("No narration text found in input")
-    return [{"number": 1, "text": plain, "pause": "pause"}]
-
 
 def text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
@@ -354,12 +270,21 @@ def resolve_piper_voice(name: str | None) -> Path:
 
 
 def elevenlabs_key() -> str:
-    load_dotenv()
-    key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    key = env_key(ELEVENLABS_KEY_NAME)
     if not key:
         raise SystemExit(
             "ElevenLabs requested but ELEVENLABS_API_KEY is missing.\n"
             "Add it with: export ELEVENLABS_API_KEY=...   or put it in .env"
+        )
+    return key
+
+
+def heygen_key() -> str:
+    key = env_key(HEYGEN_KEY_NAME)
+    if not key:
+        raise SystemExit(
+            "HeyGen requested but HEYGEN_API_KEY is missing.\n"
+            "Add it with: export HEYGEN_API_KEY=...   or put it in .env"
         )
     return key
 
@@ -513,14 +438,187 @@ def synthesize_eleven(text: str, voice_id: str, key: str) -> tuple[np.ndarray, i
     raise SystemExit(f"ElevenLabs failed after retries: {last_error}")
 
 
+def heygen_error_detail(exc: urllib.error.HTTPError) -> str:
+    raw = exc.read().decode("utf-8", errors="replace")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    err = payload.get("error") or payload
+    if isinstance(err, dict):
+        return str(err.get("message") or raw)
+    return raw
+
+
+def heygen_json(method: str, url: str, key: str, data: dict | None = None, timeout: int = 180) -> dict:
+    body = None if data is None else json.dumps(data).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method=method)
+    req.add_header("X-Api-Key", key)
+    req.add_header("x-api-key", key)
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8")
+    return json.loads(raw) if raw else {}
+
+
+def list_heygen_voices(key: str) -> list[dict]:
+    voices: list[dict] = []
+    token = ""
+    for _ in range(20):
+        url = "https://api.heygen.com/v3/voices?engine=starfish&limit=100"
+        if token:
+            url += f"&token={urllib.parse.quote(token)}"
+        payload = heygen_json("GET", url, key)
+        data = payload.get("data")
+        items: list = []
+        next_token = payload.get("next_token") or ""
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = data.get("voices") or data.get("data") or []
+            next_token = data.get("next_token") or next_token
+        voices.extend(item for item in items if isinstance(item, dict))
+        if not next_token:
+            break
+        token = str(next_token)
+    return voices
+
+
+def resolve_heygen_voice(hint: str, key: str) -> tuple[str, str]:
+    raw = (hint or DEFAULT_HEYGEN_VOICE).strip()
+    if HEYGEN_VOICE_ID_RE.match(raw):
+        return raw, raw
+    try:
+        voices = list_heygen_voices(key)
+    except urllib.error.HTTPError as exc:
+        raise SystemExit(f"Could not list HeyGen voices: {heygen_error_detail(exc)}") from exc
+    if not voices:
+        raise SystemExit("HeyGen returned no Starfish voices. Check the API key and plan.")
+
+    needle = raw.lower()
+    aliases = {
+        "default": ["chill brian", "brian", "documentary"],
+        "documentary": ["chill brian", "brian"],
+        "narrator": ["chill brian", "brian"],
+        "rumble": ["chill brian", "brian"],
+        "youtube": ["chill brian", "brian"],
+        "deep": ["chill brian", "brian"],
+        "deep male": ["chill brian", "brian"],
+        "adam": ["chill brian", "brian"],
+        "brian": ["chill brian", "brian"],
+    }
+    search_names = aliases.get(needle, [needle])
+
+    def match_name(name: str) -> dict | None:
+        want = name.lower()
+        for voice in voices:
+            if str(voice.get("name") or "").lower() == want:
+                return voice
+        for voice in voices:
+            blob = f"{voice.get('name') or ''} {voice.get('language') or ''} {voice.get('gender') or ''}".lower()
+            if want in blob:
+                return voice
+        return None
+
+    for name in search_names:
+        hit = match_name(name)
+        if hit:
+            return str(hit["voice_id"]), str(hit.get("name") or name)
+
+    males = [
+        v
+        for v in voices
+        if str(v.get("gender") or "").lower() == "male"
+        and "english" in str(v.get("language") or "").lower()
+    ]
+    pick = males[0] if males else voices[0]
+    print(f"HeyGen voice '{raw}' not found; using {pick.get('name')} ({pick.get('voice_id')})")
+    return str(pick["voice_id"]), str(pick.get("name") or pick["voice_id"])
+
+
+def download_bytes(url: str, timeout: int = 180) -> bytes:
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+def decode_to_wav(src: Path, dest: Path, sample_rate: int) -> None:
+    if shutil.which("ffmpeg"):
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(src), "-ac", "1", "-ar", str(sample_rate), str(dest)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise SystemExit(f"ffmpeg failed to decode HeyGen audio: {proc.stderr[-400:]}")
+        return
+    if sys.platform == "darwin" and shutil.which("afconvert"):
+        proc = subprocess.run(
+            ["afconvert", "-f", "WAVE", "-d", f"LEI16@{sample_rate}", str(src), str(dest)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise SystemExit(f"afconvert failed to decode HeyGen audio: {proc.stderr[-400:]}")
+        return
+    raise SystemExit(
+        "HeyGen returns MP3. Install ffmpeg, or use macOS (afconvert is built in)."
+    )
+
+
+def synthesize_heygen(text: str, voice_id: str, key: str, wav_path: Path) -> tuple[np.ndarray, int]:
+    payload = {
+        "text": text,
+        "voice_id": voice_id,
+        "input_type": "text",
+        "speed": 0.95,
+        "language": "en",
+        "locale": "en-US",
+    }
+    last_error: Exception | None = None
+    for attempt in range(4):
+        try:
+            body = heygen_json(
+                "POST",
+                "https://api.heygen.com/v3/voices/speech",
+                key,
+                payload,
+            )
+            data = body.get("data") or body
+            audio_url = str(data.get("audio_url") or "")
+            if not audio_url:
+                raise SystemExit(f"HeyGen speech response had no audio_url: {body}")
+            raw = download_bytes(audio_url)
+            tmp = wav_path.with_suffix(".mp3")
+            tmp.write_bytes(raw)
+            try:
+                decode_to_wav(tmp, wav_path, HEYGEN_PCM_RATE)
+            finally:
+                if tmp.exists():
+                    tmp.unlink()
+            return read_wav(wav_path)
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code == 429:
+                time.sleep(2 ** attempt)
+                continue
+            raise SystemExit(f"HeyGen speech error {exc.code}: {heygen_error_detail(exc)}") from exc
+        except urllib.error.URLError as exc:
+            last_error = exc
+            time.sleep(2 ** attempt)
+    raise SystemExit(f"HeyGen speech failed after retries: {last_error}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate documentary voiceover audio")
     parser.add_argument("input", nargs="?", help="03-voiceover.md or a plain script")
     parser.add_argument("--parse-topic", help="Print topic/provider/voice JSON and exit")
+    parser.add_argument("--check-keys", action="store_true", help="Print which paid API keys are set and exit")
     parser.add_argument("--from-topic", help="Raw user topic, e.g. 'jeffrey dahmer - elevenlabs - adam'")
     parser.add_argument("--output-dir", help="Directory for WAV files")
-    parser.add_argument("--provider", choices=["piper", "elevenlabs"])
-    parser.add_argument("--voice", default=None, help="Piper model, ElevenLabs name, alias, or voice ID")
+    parser.add_argument("--provider", choices=["piper", "elevenlabs", "heygen"])
+    parser.add_argument("--voice", default=None, help="Piper model, ElevenLabs/HeyGen name, alias, or voice ID")
     parser.add_argument("--semitones", type=float, default=-3.5)
     parser.add_argument("--length-scale", type=float, default=1.15)
     parser.add_argument("--pause", type=float, default=0.45)
@@ -528,6 +626,10 @@ def main() -> int:
     parser.add_argument("--no-deep", action="store_true")
     parser.add_argument("--force", action="store_true", help="Regenerate scenes even if SQLite says done")
     args = parser.parse_args()
+
+    if args.check_keys:
+        print_check_keys()
+        return 0
 
     if args.parse_topic is not None:
         print(json.dumps(parse_topic(args.parse_topic), indent=2))
@@ -560,6 +662,7 @@ def main() -> int:
     piper_voice = None
     syn_config = None
     eleven_key = ""
+    hey_key = ""
     resolved_voice = voice_hint
 
     if provider == "piper":
@@ -576,11 +679,16 @@ def main() -> int:
         piper_voice, device = load_piper_voice(model_path)
         print(f"Provider piper  voice {model_path.name}  device {device}")
         syn_config = SynthesisConfig(length_scale=args.length_scale, volume=0.95)
-    else:
+    elif provider == "elevenlabs":
         eleven_key = elevenlabs_key()
         voice_id, label = resolve_eleven_voice(voice_hint, eleven_key)
         resolved_voice = voice_id
         print(f"Provider elevenlabs  voice {label} ({voice_id})")
+    else:
+        hey_key = heygen_key()
+        voice_id, label = resolve_heygen_voice(voice_hint, hey_key)
+        resolved_voice = voice_id
+        print(f"Provider heygen  voice {label} ({voice_id})")
 
     conn = connect_db(out_dir / "progress.sqlite")
     job_id = get_or_create_job(
@@ -618,10 +726,16 @@ def main() -> int:
                     if not args.no_deep:
                         audio = pitch_shift(audio, args.semitones)
                         audio = add_warmth(audio, sample_rate)
-                else:
+                    write_wav(wav_path, audio, sample_rate)
+                elif provider == "elevenlabs":
                     audio, sample_rate = synthesize_eleven(scene["text"], resolved_voice, eleven_key)
+                    write_wav(wav_path, audio, sample_rate)
                     time.sleep(0.15)
-                write_wav(wav_path, audio, sample_rate)
+                else:
+                    audio, sample_rate = synthesize_heygen(
+                        scene["text"], resolved_voice, hey_key, wav_path
+                    )
+                    time.sleep(0.15)
                 duration = len(audio) / sample_rate if sample_rate else 0
                 mark_scene(conn, job_id, number, thash, "done", str(wav_path), None, duration)
                 generated += 1
