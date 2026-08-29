@@ -1,0 +1,39 @@
+# Secrets
+.env
+.env.*
+!.env.example
+tools/.env
+
+# Local Piper runtime (reinstall with the README)
+tools/piper-env/
+tools/piper-voices/*.onnx
+
+# Generated audio and resume DB
+output/**/audio/
+output/_piper-test/
+*.wav
+*.mp3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# SQLite leftovers
+*.sqlite
+*.sqlite3
+*.db
+:memory:.ses
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
