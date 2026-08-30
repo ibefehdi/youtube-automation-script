@@ -44,6 +44,8 @@ fi
 
 PIP=("$PY" -m pip)
 "${PIP[@]}" install --upgrade pip wheel
+# Perth (Chatterbox watermarking) still imports pkg_resources; Setuptools 81+ drops it.
+"${PIP[@]}" install "setuptools>=70,<81"
 
 HAS_NVIDIA=0
 if command -v nvidia-smi >/dev/null 2>&1; then
